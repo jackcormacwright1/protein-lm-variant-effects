@@ -33,8 +33,8 @@ duplicates). ProteinGym also publishes every model's Spearman correlation for ev
 reproduction is checked against, and five-fold cross-validation splits of the single mutants, used in the
 few-shot section.
 
-The assay files and splits (1.4 GB) and model weights (3.2 GB) are not in this repository; `data/reference/` holds
-the reference file and the published results.
+The assay files and splits (1.4 GB) and model weights (3.2 GB) are not in this repository;
+`data/reference/` holds the reference file and the published results.
 
 ## Scoring a variant
 
@@ -190,8 +190,8 @@ with ProteinGym's published figures, which is sound because the reproduction mat
 it is not a fresh measurement.
 
 **The masked-marginal comparison is a subset.** Scoring the expensive way costs a forward pass per mutated
-position, so it was run at 8M for 198 of the 217 assays, at 150M for those up to 250 residues and at 650M
-for those up to 100. Short proteins in ProteinGym are mostly stability assays, so the larger-model
+position, so it was run at 8M for 198 of the 217 assays, at 150M for the 110 up to 250 residues and at 650M
+for the 70 up to 100. Short proteins in ProteinGym are mostly stability assays, so the larger-model
 comparisons are not a random sample of the benchmark.
 
 ## References
