@@ -275,6 +275,7 @@ with tabs[1]:
                          base.mark_line(point=True)).properties(height=400), use_container_width=True)
         wide = scaling[scaling["source"] == "published (masked)"].pivot(
             index="group", columns="size", values="spearman").reindex(columns=SIZES)
+        wide.index = [PRETTY.get(g, g) for g in wide.index]
         delta = (wide["15B"] - wide["650M"]).sort_values()
         callout("Accuracy stops improving at 650M: the published 15B model is worse overall "
                 f"({wide.loc['All', '15B']:.3f} against {wide.loc['All', '650M']:.3f}). The averages hide "
