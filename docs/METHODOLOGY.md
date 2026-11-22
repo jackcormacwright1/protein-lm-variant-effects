@@ -168,3 +168,43 @@ penalty is chosen within the training set by leave-one-out cross-validation over
 training set is only possible in a larger assay, so each point on a learning curve compares the supervised
 models with the zero-shot score on exactly the assays big enough to reach that training size in every fold,
 and the number of assays is reported alongside.
+
+## Diagnostics and caveats
+
+The hierarchical models are sampled with four chains of 2,000 draws after 2,000 tuning steps at
+`target_accept = 0.99`; R-hat is at most 1.009 and the smallest bulk effective sample size 374 for the
+accuracy model, with no divergences. The variant without protein effects has a handful of divergences, which
+is the usual funnel between the group spreads and is why the main model is the one reported.
+
+Three caveats are worth stating plainly.
+
+**Taxon is nested inside protein.** No protein in ProteinGym spans two taxa, and only 14 of 186 have assays
+of more than one function, so the protein effects and the group effects compete for the same between-protein
+variation. The protein level is included because 24 proteins have several assays, which would otherwise be
+counted as independent evidence; dropping it moves variance from the protein spread into the residual
+(0.153 to 0.205) and leaves the coefficients where they were.
+
+**The scaling comparison uses published numbers for 3B and 15B.** Those two sizes were not run here — the
+weights are 11 GB and 60 GB. The comparison of 650M with 15B therefore mixes this project's reproduction
+with ProteinGym's published figures, which is sound because the reproduction matches to within 0.0005, but
+it is not a fresh measurement.
+
+**The masked-marginal comparison is a subset.** Scoring the expensive way costs a forward pass per mutated
+position, so it was run at 8M for 198 of the 217 assays, at 150M for those up to 250 residues and at 650M
+for those up to 100. Short proteins in ProteinGym are mostly stability assays, so the larger-model
+comparisons are not a random sample of the benchmark.
+
+## References
+
+- Fieller, E. C., Hartley, H. O. and Pearson, E. S. (1957). Tests for rank correlation coefficients I.
+  *Biometrika* 44, 470–481.
+- Gordon, C., Lu, A. X. and Abbeel, P. (2025). Protein language model fitness is a matter of preference.
+  *International Conference on Learning Representations*.
+- Hsu, C., Nisonoff, H., Fannjiang, C. and Listgarten, J. (2022). Learning protein fitness models from
+  evolutionary and assay-labeled data. *Nature Biotechnology* 40, 1114–1122.
+- Lin, Z. et al. (2023). Evolutionary-scale prediction of atomic-level protein structure with a language
+  model. *Science* 379, 1123–1130.
+- Meier, J. et al. (2021). Language models enable zero-shot prediction of the effects of mutations on protein
+  function. *Advances in Neural Information Processing Systems* 34.
+- Notin, P. et al. (2023). ProteinGym: large-scale benchmarks for protein fitness prediction and design.
+  *Advances in Neural Information Processing Systems* 36.

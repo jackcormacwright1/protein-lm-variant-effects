@@ -29,6 +29,8 @@ SIZE_COLOUR = dict(zip(SIZES, RAMP))
 SCHEME = {"random": "#2a78d6", "modulo": "#eb6834", "contiguous": "#1baf7a"}
 TAXON = {"Human": "#2a78d6", "Eukaryote": "#eb6834", "Prokaryote": "#1baf7a", "Virus": "#6250d6"}
 PREDICTOR = {"zero-shot": "#6b6a66", "one-hot": "#eb6834", "augmented": "#2a78d6"}
+SCHEME_NAMES = {"random": "Random variants", "modulo": "Every fifth position",
+                "contiguous": "Blocks of sequence"}
 INK, MUTED, GRID = "#1d1d1b", "#6b6a66", "#e1e0d9"
 FUNCTION_NAMES = {"OrganismalFitness": "Organismal fitness"}
 FEATURE_NAMES = {"log_neff_l": "Alignment depth", "log_length": "Sequence length",
@@ -244,11 +246,14 @@ def fewshot_figure(summary):
         z = d[d["model"] == "augmented"].sort_values("n_train")
         ax.plot(z["n_train"], z["zero_shot"], color=PREDICTOR["zero-shot"], ls="--",
                 label="zero-shot (same assays)")
-        ax.set(xscale="log", xlabel="measured variants used for training", title=scheme)
+        ax.set(xscale="log", xlabel="measured variants used for training", title=SCHEME_NAMES[scheme])
+        last = d[d["n_train"] == d["n_train"].max()]
+        ax.text(0.98, 0.03, f"{int(d['n_assays'].max())} assays, {int(last['n_assays'].iloc[0])} at the "
+                            "largest size", transform=ax.transAxes, ha="right", fontsize=7.5, color=MUTED)
     axes[0].set_ylabel("Spearman (ProteinGym average)")
     axes[0].legend(fontsize=8, loc="upper left")
-    fig.suptitle("How many measurements it takes to beat the zero-shot score depends on the split", x=0.01,
-                 ha="left", y=1.03)
+    fig.suptitle("Measurements beat the zero-shot score easily on positions already measured, and barely "
+                 "on new ones", x=0.01, ha="left", y=1.03)
     save(fig, "fewshot.png")
 
 

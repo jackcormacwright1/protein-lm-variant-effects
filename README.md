@@ -53,6 +53,19 @@ All of it runs on two CPU cores — 2.1 hours of compute in total, no GPU.
 
    ![Preference](results/preference.png)
 
+5. **Measurements beat the zero-shot score easily on positions already measured, and barely on new ones.**
+   Ridge regressions trained on *n* measured single mutants, under ProteinGym's three ways of splitting an
+   assay. When test variants are random — so a test variant's position has usually been measured already with
+   a different substitution — a plain one-hot model passes the zero-shot score (0.40) somewhere between 96
+   and 192 measurements, and reaches 0.60 by 768. When whole positions are held out instead, the same model
+   reaches 0.18 at 768: it has learned which positions are sensitive, and nothing that transfers. Adding the
+   zero-shot score as a feature rescues it, but the gain over zero-shot alone is small: +0.27 at 768
+   measurements on seen positions, +0.04 on new ones. The usual way of reporting few-shot results — random
+   splits — measures something close to interpolation within an assay, not what someone with a new protein
+   would get.
+
+   ![Learning curves](results/fewshot.png)
+
 ## Reproducing ProteinGym
 
 Scored ProteinGym's way, this project's per-assay Spearman matches its published ESM-2 numbers to within
