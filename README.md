@@ -16,14 +16,19 @@ All of it runs on two CPU cores — 2.1 hours of compute in total, no GPU.
 1. **The expensive way of scoring buys nothing on single mutants, and loses on multiple ones.** ProteinGym
    scores ESM models with the *masked marginal*: mask each mutated position in turn, one forward pass per
    position. One pass over the unmasked sequence gives every position at once, a median of 150 times cheaper
-   per assay. On single mutants the two are equivalent (per-assay Spearman 0.201 against 0.205 at 8M, 0.465
-   against 0.471 at 150M). On assays where variants carry several substitutions the cheap score is clearly
-   better (0.418 against 0.267 at 8M), because measured fitness falls with the number of substitutions and
-   the masked score barely tracks that: its rank correlation with the mutation count is −0.24, against −0.72
-   for the one-pass score and −0.38 in the data itself. The unmasked model is far more confident in the
-   wild-type residue (mean log probability −0.41 against −2.45), so each substitution subtracts more, and the
-   sum over several of them carries the count. Over the whole benchmark the cheap score is ahead at every
-   size: 0.251 against 0.226 at 8M, 0.417 against 0.414 at 650M.
+   per assay. On single mutants the two are equivalent at every size — per-assay Spearman 0.201 against
+   0.205 at 8M, 0.412 against 0.420 at 150M, 0.476 against 0.477 at 650M. The whole difference is in assays
+   whose variants carry several substitutions, and it closes as the model grows: +0.151 at 8M (0.418 against
+   0.267), +0.043 at 150M, +0.024 at 650M.
+
+   The reason is how much of the mutation count each score carries. Measured fitness falls with the number
+   of substitutions (rank correlation −0.38 to −0.43). The one-pass score tracks that strongly at every size
+   (−0.72 to −0.76); the masked score barely does at 8M (−0.24) and increasingly does as the model grows
+   (−0.50 at 150M, −0.59 at 650M). Masking a position leaves a small model very unsure of the residue that
+   belongs there — mean log probability −2.45 at 8M, against −0.41 when it can see it — so each substitution
+   subtracts little and a sum over several of them barely registers how many there are. A larger model is
+   much less unsure (−1.54 at 650M), the penalty grows, and the two ways of scoring converge. Over the whole
+   benchmark the cheap score is ahead at every size: 0.251 against 0.226 at 8M, 0.417 against 0.414 at 650M.
 
    ![Scoring methods](results/scoring_methods.png)
 

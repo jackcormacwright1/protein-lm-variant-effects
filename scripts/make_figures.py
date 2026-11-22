@@ -105,16 +105,23 @@ def scoring_methods_figure(cmp):
            title="All variants")
 
     ax = axes[2]
-    g = cmp[(cmp["size"] == sizes[0]) & (cmp["share_multiple"] > 0.2)]
-    x = np.arange(3)
-    vals = [g["measured_vs_count"].mean(), g["wt_vs_count"].mean(), g["masked_vs_count"].mean()]
-    ax.bar(x, vals, color=[MUTED, SIZE_COLOUR[sizes[0]], "#eb6834"], width=0.6)
-    ax.set_xticks(x, ["measured\nfitness", "wild-type\nmarginal", "masked\nmarginal"], fontsize=9)
-    ax.set(ylabel="rank correlation with the number\nof substitutions",
-           title=f"Why: {sizes[0]}, {len(g)} mixed assays")
+    width = 0.26
+    for j, (label, col, colour) in enumerate((("measured fitness", "measured_vs_count", MUTED),
+                                              ("wild-type marginal", "wt_vs_count", "#2a78d6"),
+                                              ("masked marginal", "masked_vs_count", "#eb6834"))):
+        vals, ns = [], []
+        for size in sizes:
+            g = cmp[(cmp["size"] == size) & (cmp["share_multiple"] > 0.2)]
+            vals.append(g[col].mean())
+            ns.append(len(g))
+        ax.bar(np.arange(len(sizes)) + (j - 1) * width, vals, width=width, color=colour, label=label)
+    ax.set_xticks(np.arange(len(sizes)), [f"{s}\n{n} assays" for s, n in zip(sizes, ns)], fontsize=9)
+    ax.set(ylabel="rank correlation with mutation count", title="Why, and why it closes")
+    ax.legend(fontsize=8, loc="lower right")
     ax.grid(axis="x", visible=False)
-    fig.suptitle("The two scores agree on single mutants and differ on multiple ones", x=0.01, ha="left",
-                 y=1.03)
+
+    fig.suptitle("The two scores agree on single mutants; on multiple ones the gap closes with model size",
+                 x=0.01, ha="left", y=1.03)
     save(fig, "scoring_methods.png")
 
 
