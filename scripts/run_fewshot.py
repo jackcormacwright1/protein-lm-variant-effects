@@ -29,10 +29,15 @@ from plm.fewshot import SCHEMES, learning_curve, summarise  # noqa: E402
 from plm.scoring import LogProbs  # noqa: E402
 
 SIZES = (24, 48, 96, 192, 384, 768, 1536)
+PER_ASSAY = DATA / "cache" / "fewshot"
 
 
 def job(args):
+    """One assay's curves, cached so a stopped run resumes where it left off."""
     dms_id, cache = args
+    path = PER_ASSAY / f"{dms_id}.csv"
+    if path.exists():
+        return pd.read_csv(path)
     ref = reference()
     assay = load(dms_id, ref, folds=True)
     zs = LogProbs.load(DATA / "cache" / cache / f"{dms_id}.npz").score(assay.variants["mutant"])
@@ -41,6 +46,8 @@ def job(args):
     out = pd.concat(parts, ignore_index=True)
     out.insert(0, "DMS_id", dms_id)
     out["n_singles"] = len(assay.variants)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(path, index=False)
     return out
 
 
@@ -51,12 +58,13 @@ def main():
     args = ap.parse_args()
     ref = reference()
     ids = list(ref.sort_values("DMS_number_single_mutants", ascending=False).index)
+    print(f"{len(ids)} assays, {sum(not (PER_ASSAY / f'{i}.csv').exists() for i in ids)} to do", flush=True)
     t0 = time.time()
     parts = []
     with Pool(args.workers) as pool:
         for i, res in enumerate(pool.imap_unordered(job, [(d, args.zero_shot) for d in ids]), 1):
             parts.append(res)
-            if i % 20 == 0 or i == len(ids):
+            if i % 10 == 0 or i == len(ids):
                 print(f"  {i}/{len(ids)} assays ({time.time() - t0:.0f}s)", flush=True)
     out = pd.concat(parts, ignore_index=True)
     (ROOT / "results").mkdir(exist_ok=True)
