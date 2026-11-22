@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from plm.data import PUBLISHED, reference  # noqa: E402
-from plm.evaluate import CACHE, aggregate, bootstrap_se, by_function, spearman_table  # noqa: E402
+from plm.evaluate import CACHE, aggregate, bootstrap_se, by_function, spearman_tables  # noqa: E402
 from plm.scoring import LogProbs  # noqa: E402
 
 RESULTS = ROOT / "results"
@@ -61,12 +61,11 @@ def build_assay_table(ref: pd.DataFrame) -> pd.DataFrame:
         df[f"published_{s}"] = pub[f"ESM2 ({s})"]
     df["published_site_independent"] = pub["Site-Independent"]
     df["published_eve"] = pub["EVE (ensemble)"]
-    for name in sorted(p.name for p in CACHE.iterdir() if p.is_dir()):
-        t = spearman_table(name, ref)
+    caches = sorted(p.name for p in CACHE.iterdir() if p.is_dir() and p.name.split("_")[-1] in ("wt", "masked"))
+    for name, t in spearman_tables(caches, ref).items():
         df[f"mine_{name}"] = t["spearman"]
-        if name.endswith("_wt"):
-            df[f"singles_{name}"] = t["spearman_singles"]
-        print(f"  scored {name}: {t['spearman'].notna().sum()} assays", flush=True)
+        df[f"singles_{name}"] = t["spearman_singles"]
+        print(f"  scored {name}: {len(t)} assays", flush=True)
     return df.join(pll_table(ref))
 
 

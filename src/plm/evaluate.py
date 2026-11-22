@@ -58,16 +58,29 @@ def score_assay(dms_id: str, cache_dir: Path, ref: pd.DataFrame) -> pd.DataFrame
     return v
 
 
-def spearman_table(cache_name: str, ref: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Per-assay Spearman (all variants, and single mutants only) for one cache (e.g. '8M_masked')."""
+def spearman_tables(cache_names: list[str], ref: pd.DataFrame | None = None) -> dict[str, pd.DataFrame]:
+    """Per-assay Spearman for several caches at once (e.g. ['8M_wt', '8M_masked']), reading each assay's
+    measurements once. For each cache: the correlation over all variants, over the single mutants alone, and
+    the counts."""
     ref = ref if ref is not None else reference()
-    cache_dir = CACHE / cache_name
-    rows = []
-    for path in sorted(cache_dir.glob("*.npz")):
-        v = score_assay(path.stem, cache_dir, ref)
-        singles = v[v["n_mutations"] == 1]
-        lp = LogProbs.load(path)
-        rows.append({"DMS_id": path.stem, "spearman": spearmanr(v["score"], v["DMS_score"]).statistic,
-                     "spearman_singles": spearmanr(singles["score"], singles["DMS_score"]).statistic,
-                     "n": len(v), "n_singles": len(singles), "wt_loglik": lp.wildtype_log_likelihood()})
-    return pd.DataFrame(rows).set_index("DMS_id")
+    rows = {name: [] for name in cache_names}
+    for dms_id in ref.index:
+        paths = {n: CACHE / n / f"{dms_id}.npz" for n in cache_names}
+        if not any(p.exists() for p in paths.values()):
+            continue
+        v = load(dms_id, ref).variants
+        single = v["n_mutations"] == 1
+        for name, path in paths.items():
+            if not path.exists():
+                continue
+            score = LogProbs.load(path).score(v["mutant"])
+            rows[name].append({"DMS_id": dms_id, "spearman": spearmanr(score, v["DMS_score"]).statistic,
+                               "spearman_singles": spearmanr(score[single.to_numpy()],
+                                                             v.loc[single, "DMS_score"]).statistic,
+                               "n": len(v), "n_singles": int(single.sum())})
+    return {name: pd.DataFrame(r).set_index("DMS_id") for name, r in rows.items()}
+
+
+def spearman_table(cache_name: str, ref: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Per-assay Spearman for one cache (e.g. '8M_masked')."""
+    return spearman_tables([cache_name], ref)[cache_name]
