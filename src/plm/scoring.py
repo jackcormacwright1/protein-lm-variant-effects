@@ -16,9 +16,14 @@ ESM-2 reads at most 1,022 residues. For a longer protein each position is read f
 placed so the position is as central as possible: for the masked marginal its own window, as ProteinGym does;
 for the wild-type marginal, the most central of a set of half-overlapping windows.
 
-The model's preference for the wild-type sequence itself is measured by its pseudo-log-likelihood: the average,
-over positions, of the log probability of the wild-type residue with that position masked. For the larger
-models this is estimated from a random sample of positions ("pll" strategy) rather than every position.
+The model's preference for the wild-type sequence itself is measured by its pseudo-log-likelihood (PLL): the
+average, over positions, of the log probability of the wild-type residue with that position masked. Computed
+directly that takes one pass per position. Gordon, Lu and Abbeel (2025) showed it can be recovered from the
+single unmasked pass: in ESM-2's training, a residue the model can see and must predict was kept unchanged
+(10% of the time) or swapped for a random residue (10%), so a model consistent with its training reads
+p_unmasked = p_masked / 2 + 1/2, and p_masked = 2 p_unmasked - 1 (floored at 0.001). The wild-type marginal
+here stores every position, so the single-pass PLL comes free with it; the masked marginals, where they exist,
+give the direct PLL over the mutated positions to check it against.
 """
 
 from __future__ import annotations
@@ -66,10 +71,26 @@ class LogProbs:
             out[k] = s
         return out
 
-    def wildtype_log_likelihood(self) -> float:
-        """Mean log probability of the wild-type residue over the scored positions."""
-        idx = [AA_INDEX[self.sequence[p - 1]] for p in self.positions]
-        return float(np.mean(self.logp[np.arange(len(idx)), idx]))
+    def wildtype_logp(self, positions: np.ndarray | None = None) -> np.ndarray:
+        """Log probability of the wild-type residue at the given positions (default: all scored ones)."""
+        row = {p: i for i, p in enumerate(self.positions)}
+        positions = self.positions if positions is None else positions
+        rows = [row[p] for p in positions]
+        idx = [AA_INDEX[self.sequence[p - 1]] for p in positions]
+        return self.logp[rows, idx]
+
+    def wildtype_log_likelihood(self, positions: np.ndarray | None = None) -> float:
+        """Mean log probability of the wild-type residue: the PLL when these are masked marginals."""
+        return float(np.mean(self.wildtype_logp(positions)))
+
+    def single_pass_pll(self, positions: np.ndarray | None = None, alpha: float = 0.1, beta: float = 0.1,
+                        floor: float = 1e-3) -> float:
+        """PLL recovered from wild-type (unmasked) marginals, after Gordon, Lu and Abbeel (2025): alpha of the
+        predicted residues were kept and beta randomly replaced in training, so
+        p_masked = (alpha + beta) / alpha * p_unmasked - beta / alpha."""
+        p = np.exp(self.wildtype_logp(positions))
+        q = np.maximum((alpha + beta) / alpha * p - beta / alpha, floor)
+        return float(np.mean(np.log(q)))
 
 
 def optimal_window(pos0: int, length: int, window: int = MAX_RESIDUES) -> tuple[int, int]:
@@ -146,22 +167,13 @@ class Scorer:
                 out[k] = lp[j, idx]
         return LogProbs(positions=np.asarray(positions), logp=out, sequence=seq)
 
-    def score_assay(self, assay: Assay, strategy: str, n_sample: int = 40) -> tuple[LogProbs, float]:
+    def score_assay(self, assay: Assay, strategy: str) -> tuple[LogProbs, float]:
         t0 = time.time()
         if strategy == "wt":
-            lp = self.wildtype_marginal(assay.sequence, assay.positions)
+            lp = self.wildtype_marginal(assay.sequence)      # every position, for the single-pass PLL
         elif strategy == "masked":
             lp = self.masked_marginal(assay.sequence, assay.positions)
-        elif strategy == "pll":
-            lp = self.masked_marginal(assay.sequence, sample_positions(assay.id, len(assay.sequence), n_sample))
         else:
             raise ValueError(strategy)
         return lp, time.time() - t0
 
-
-def sample_positions(key: str, length: int, n: int) -> np.ndarray:
-    """A reproducible random sample of n positions (1-based; all of them if the protein is shorter)."""
-    if length <= n:
-        return np.arange(1, length + 1)
-    seed = sum(ord(c) * 31 ** i for i, c in enumerate(key)) % (2 ** 32)
-    return np.sort(np.random.default_rng(seed).choice(np.arange(1, length + 1), size=n, replace=False))

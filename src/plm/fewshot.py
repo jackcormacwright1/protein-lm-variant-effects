@@ -84,3 +84,25 @@ def learning_curve(assay: Assay, zero_shot: np.ndarray, sizes: tuple[int, ...], 
                 rows.append({"scheme": scheme, "fold": k, "n_train": n, "model": name,
                              "spearman": _spearman(model.predict(X[test]), y[test])})
     return pd.DataFrame(rows)
+
+
+def summarise(results: pd.DataFrame, ref: pd.DataFrame, aggregate) -> pd.DataFrame:
+    """Learning curves in ProteinGym's averaging. Larger training sets exist only for larger assays, so each
+    point compares a supervised model with the zero-shot score on the same assays: those big enough for that
+    training size in every fold."""
+    per = results.groupby(["DMS_id", "scheme", "model", "n_train"])["spearman"].agg(["mean", "count"])
+    per = per.reset_index()
+    zs = per[per["model"] == "zero-shot"].set_index(["DMS_id", "scheme"])["mean"]
+    folds = per[per["model"] == "zero-shot"].set_index(["DMS_id", "scheme"])["count"]
+    rows = []
+    sup = per[per["model"] != "zero-shot"]
+    for (scheme, model, n), g in sup.groupby(["scheme", "model", "n_train"]):
+        g = g.set_index("DMS_id")
+        g = g[g["count"] == folds.xs(scheme, level="scheme").reindex(g.index)]   # n reached in every fold
+        z = zs.xs(scheme, level="scheme").reindex(g.index)
+        rows.append({"scheme": scheme, "model": model, "n_train": n, "n_assays": len(g),
+                     "spearman": aggregate(g["mean"], ref), "zero_shot": aggregate(z, ref),
+                     "share_beating_zero_shot": float((g["mean"] > z).mean())})
+    out = pd.DataFrame(rows)
+    out["gain"] = out["spearman"] - out["zero_shot"]
+    return out

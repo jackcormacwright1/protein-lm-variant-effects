@@ -31,13 +31,26 @@ from plm.scoring import LogProbs  # noqa: E402
 
 RESULTS = ROOT / "results"
 SIZES = ["8M", "35M", "150M", "650M", "3B", "15B"]
+OWN = ["8M", "35M", "150M", "650M"]       # sizes scored here
 PARAMS = {"8M": 8e6, "35M": 35e6, "150M": 150e6, "650M": 650e6, "3B": 3e9, "15B": 15e9}
 
 
-def pll_table(size: str, ref: pd.DataFrame) -> pd.Series:
-    d = CACHE / f"{size}_pll"
-    return pd.Series({p.stem: LogProbs.load(p).wildtype_log_likelihood() for p in sorted(d.glob("*.npz"))},
-                     name=f"pll_{size}")
+def pll_table(ref: pd.DataFrame) -> pd.DataFrame:
+    """The models' preference for each wild-type sequence. Over every position: the single-pass PLL and the
+    plain unmasked log-likelihood. Where masked marginals exist: the direct PLL over the mutated positions and,
+    to check against it, the two single-pass measures over the same positions."""
+    cols = {}
+    for s in OWN:
+        wt = {p.stem: LogProbs.load(p) for p in sorted((CACHE / f"{s}_wt").glob("*.npz"))}
+        cols[f"pll_single_{s}"] = {k: v.single_pass_pll() for k, v in wt.items()}
+        cols[f"loglik_unmasked_{s}"] = {k: v.wildtype_log_likelihood() for k, v in wt.items()}
+        for p in sorted((CACHE / f"{s}_masked").glob("*.npz")):
+            m = LogProbs.load(p)
+            cols.setdefault(f"pll_exact_{s}", {})[p.stem] = m.wildtype_log_likelihood()
+            cols.setdefault(f"pll_single_mutated_{s}", {})[p.stem] = wt[p.stem].single_pass_pll(m.positions)
+            cols.setdefault(f"loglik_unmasked_mutated_{s}", {})[p.stem] = \
+                wt[p.stem].wildtype_log_likelihood(m.positions)
+    return pd.DataFrame(cols).reindex(ref.index)
 
 
 def build_assay_table(ref: pd.DataFrame) -> pd.DataFrame:
@@ -48,16 +61,13 @@ def build_assay_table(ref: pd.DataFrame) -> pd.DataFrame:
         df[f"published_{s}"] = pub[f"ESM2 ({s})"]
     df["published_site_independent"] = pub["Site-Independent"]
     df["published_eve"] = pub["EVE (ensemble)"]
-    for name in sorted(p.name for p in CACHE.iterdir() if p.is_dir() and not p.name.endswith("_pll")):
+    for name in sorted(p.name for p in CACHE.iterdir() if p.is_dir()):
         t = spearman_table(name, ref)
         df[f"mine_{name}"] = t["spearman"]
         if name.endswith("_wt"):
             df[f"singles_{name}"] = t["spearman_singles"]
         print(f"  scored {name}: {t['spearman'].notna().sum()} assays", flush=True)
-    for s in ("8M", "35M", "150M", "650M"):
-        if (CACHE / f"{s}_pll").exists():
-            df[f"pll_{s}"] = pll_table(s, ref)
-    return df
+    return df.join(pll_table(ref))
 
 
 def scaling_table(df: pd.DataFrame, ref: pd.DataFrame) -> pd.DataFrame:

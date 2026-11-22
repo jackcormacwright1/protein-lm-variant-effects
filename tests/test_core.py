@@ -8,7 +8,7 @@ import pytest
 from plm.data import AMINO_ACIDS, Assay, Mutation, PUBLISHED, REFERENCE, parse, reference
 from plm.evaluate import aggregate, by_function
 from plm.fewshot import features, learning_curve
-from plm.scoring import MAX_RESIDUES, LogProbs, optimal_window, sample_positions, tiled_windows
+from plm.scoring import MAX_RESIDUES, LogProbs, optimal_window, tiled_windows
 
 
 def test_parse_single_and_multiple_mutants():
@@ -45,11 +45,16 @@ def test_windows_cover_long_proteins_and_centre_each_position():
     assert covered.all()
 
 
-def test_sampled_positions_are_reproducible():
-    a = sample_positions("X_HUMAN", 500, 40)
-    assert np.array_equal(a, sample_positions("X_HUMAN", 500, 40))
-    assert len(a) == 40 and a.min() >= 1 and a.max() <= 500 and len(set(a)) == 40
-    assert np.array_equal(sample_positions("Y", 30, 40), np.arange(1, 31))
+def test_single_pass_pll_inverts_the_training_mix():
+    seq = "AC"
+    q = np.array([0.6, 0.05])                        # masked probabilities of the wild-type residues
+    u = 0.5 * q + 0.5                                # what a mask-consistent model shows unmasked
+    logp = np.log(np.full((2, 20), 1e-4))
+    logp[0, AMINO_ACIDS.index("A")] = np.log(u[0])
+    logp[1, AMINO_ACIDS.index("C")] = np.log(u[1])
+    lp = LogProbs(positions=np.array([1, 2]), logp=logp, sequence=seq)
+    assert lp.single_pass_pll() == pytest.approx(np.mean(np.log(q)))
+    assert lp.wildtype_log_likelihood(np.array([2])) == pytest.approx(np.log(u[1]))
 
 
 def test_aggregation_reproduces_proteingym_summary():

@@ -7,7 +7,6 @@ Usage:
   python scripts/score_assays.py --model 8M --strategy masked
   python scripts/score_assays.py --model 650M --strategy wt
   python scripts/score_assays.py --model 150M --strategy masked --max-length 250   (short proteins only)
-  python scripts/score_assays.py --model 650M --strategy pll --sample 40   (wild-type pseudo-likelihood only)
 
 Weights are read from --weights-dir (default ../esm_weights), as downloaded from
 https://dl.fbaipublicfiles.com/fair-esm/models/<name>.pt
@@ -32,8 +31,7 @@ CACHE = DATA / "cache"
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", choices=list(MODELS), required=True)
-    ap.add_argument("--strategy", choices=["wt", "masked", "pll"], required=True)
-    ap.add_argument("--sample", type=int, default=40, help="positions sampled for the pll strategy")
+    ap.add_argument("--strategy", choices=["wt", "masked"], required=True)
     ap.add_argument("--weights-dir", type=Path, default=ROOT.parent / "esm_weights")
     ap.add_argument("--max-length", type=int, default=None, help="only proteins up to this length")
     ap.add_argument("--assays", nargs="*", help="DMS ids (default: all)")
@@ -54,7 +52,7 @@ def main():
     timings = CACHE / "timings.csv"
     for n, dms_id in enumerate(todo, 1):
         assay = load(dms_id, ref)
-        lp, secs = scorer.score_assay(assay, args.strategy, n_sample=args.sample)
+        lp, secs = scorer.score_assay(assay, args.strategy)
         lp.save(out_dir / f"{dms_id}.npz")
         new = not timings.exists()
         with open(timings, "a") as f:
