@@ -142,8 +142,8 @@ def main():
 
     from plm.hierarchy import design, fit
     df = df.assign(n=df["DMS_total_number_mutants"])
-    feats = ["log_neff_l", "log_length", "pll_650M"]
-    d = design(df, "published_650M", "n", feats, squares=("pll_650M",))
+    feats = ["log_neff_l", "log_length", "pll_single_650M"]
+    d = design(df, "published_650M", "n", feats, squares=("pll_single_650M",))
     _, idata = fit(d)
     summary = posterior_summary(idata, d)
     protein_eff = idata.posterior["protein_effect"].values.reshape(-1, d.protein.max() + 1).mean(axis=0)
@@ -155,7 +155,7 @@ def main():
     # what changes from 650M to 15B: same structure, outcome the difference in Fisher z
     z15, se15 = np.arctanh(df["published_15B"].clip(-0.999, 0.999)), np.sqrt(1.06 / (df["n"] - 3))
     df["delta_15B"] = np.tanh(z15 - np.arctanh(df["published_650M"].clip(-0.999, 0.999)))
-    d2 = design(df, "delta_15B", "n", feats, squares=("pll_650M",))
+    d2 = design(df, "delta_15B", "n", feats, squares=("pll_single_650M",))
     d2.se = np.sqrt(2) * se15.to_numpy()
     _, idata2 = fit(d2)
     summary2 = posterior_summary(idata2, d2)

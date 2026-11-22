@@ -7,7 +7,7 @@ import pytest
 
 from plm.data import AMINO_ACIDS, Assay, Mutation, PUBLISHED, REFERENCE, parse, reference
 from plm.evaluate import aggregate, by_function
-from plm.fewshot import features, learning_curve
+from plm.fewshot import features, learning_curve, summarise
 from plm.scoring import MAX_RESIDUES, LogProbs, optimal_window, tiled_windows
 
 
@@ -107,3 +107,30 @@ def test_random_splits_reward_memorising_positions_but_contiguous_splits_do_not(
     assert one_hot(cont) < 0.3          # new positions: nothing to go on
     aug = cont[(cont["model"] == "augmented") & (cont["n_train"] == 400)]["spearman"].mean()
     assert aug > one_hot(cont) + 0.2    # the zero-shot prior carries over to new positions
+
+
+def test_summary_compares_like_with_like_at_each_training_size():
+    """A big assay reaches every training size; a small one drops out of the larger ones, and must not drag
+    the zero-shot comparison with it."""
+    ref = pd.DataFrame({"UniProt_ID": ["P1", "P2"], "coarse_selection_type": ["Stability", "Stability"]},
+                       index=pd.Index(["BIG", "SMALL"], name="DMS_id"))
+    rows = []
+    for fold in range(5):
+        rows.append({"DMS_id": "BIG", "scheme": "random", "fold": fold, "n_train": 0,
+                     "model": "zero-shot", "spearman": 0.5})
+        rows.append({"DMS_id": "SMALL", "scheme": "random", "fold": fold, "n_train": 0,
+                     "model": "zero-shot", "spearman": 0.1})
+        for n in (24, 48):
+            rows.append({"DMS_id": "BIG", "scheme": "random", "fold": fold, "n_train": n,
+                         "model": "one-hot", "spearman": 0.6})
+        rows.append({"DMS_id": "SMALL", "scheme": "random", "fold": fold, "n_train": 24,
+                     "model": "one-hot", "spearman": 0.2})
+    rows.append({"DMS_id": "SMALL", "scheme": "random", "fold": 0, "n_train": 48,
+                 "model": "one-hot", "spearman": 0.2})      # reached in one fold only: excluded
+    out = summarise(pd.DataFrame(rows), ref, aggregate).set_index("n_train")
+    assert out.loc[24, "n_assays"] == 2
+    assert out.loc[24, "spearman"] == pytest.approx(0.4)      # (0.6 + 0.2) / 2
+    assert out.loc[24, "zero_shot"] == pytest.approx(0.3)
+    assert out.loc[48, "n_assays"] == 1
+    assert out.loc[48, "spearman"] == pytest.approx(0.6)
+    assert out.loc[48, "zero_shot"] == pytest.approx(0.5)     # the big assay's own zero-shot, not the mean

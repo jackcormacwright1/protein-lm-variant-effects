@@ -69,3 +69,95 @@ several assays and organismal-fitness assays outnumber binding assays six to one
 each protein (per function), then proteins within each of the five functions, then the five functions. Every
 aggregate here uses that scheme, and `tests/test_core.py` checks it reproduces ProteinGym's published summary
 from the published per-assay numbers. Standard errors come from resampling assays with replacement.
+
+## How much the model prefers the natural sequence
+
+Gordon, Lu and Abbeel (2025) argue that a model's accuracy on a protein depends on how strongly it prefers
+that protein's natural sequence: too little and the model has nothing useful to say, too much and it has
+effectively memorised the wild type and ranks every substitution as roughly equally bad. The measure is the
+pseudo-log-likelihood (PLL): the average over positions of the log probability of the wild-type residue
+*with that position masked*.
+
+Computed directly that costs one forward pass per position, which is why it is usually estimated. Their
+observation is that it can be recovered from the single unmasked pass, because of how ESM-2 was trained. Of
+the residues the model was asked to predict, 80% were replaced by a mask token, 10% by a random residue and
+10% left unchanged. A model consistent with that training, shown an unmasked residue, cannot tell whether it
+is being asked to predict a residue it has been shown (probability α = 0.1) or one that was randomly
+replaced (β = 0.1); so
+
+```
+p(x_i | all residues shown) = α/(α+β) p(x_i | x_i masked) + β/(α+β) · 1
+```
+
+which rearranges to
+
+```
+p(x_i | x_i masked) = (α+β)/α · p(x_i | shown) - β/α      = 2 p(x_i | shown) - 1   for ESM-2
+```
+
+floored at 0.001 before taking the log, since the right-hand side can go negative. The wild-type marginal
+stores every position, so this PLL comes free with the scores; where masked marginals exist, the direct PLL
+over the same positions checks it.
+
+For ESM-2 8M, on the 198 proteins where both are available, the single-pass PLL correlates with the direct
+one at Spearman 0.84 across proteins, and per residue the recovered log probabilities correlate with the
+direct ones at Pearson 0.80 on average. The approximation is systematically too high (mean PLL −1.70 against
+−2.45) and is worst where the model is least sure: residues it shows at probability below 0.5 unmasked are
+floored, and those are 13% of residues. It preserves the ranking of proteins well enough for the regression
+below, which is what it is used for here, but it is not a substitute for the direct PLL.
+
+## Which assays does the model get right?
+
+Per-assay accuracy is modelled on the Fisher z scale, z = atanh(r), where the sampling error of a Spearman
+correlation over n variants is roughly normal with variance 1.06/(n − 3) (Fieller, Hartley and Pearson,
+1957). Most assays have thousands of variants, so sampling error is small and nearly all the variation
+between assays is real. The model separates the two:
+
+```
+z_a ~ Normal(mu_a, sqrt(se_a^2 + sigma^2))
+mu_a = alpha + b_function[f_a] + b_taxon[t_a] + g . x_a + u_protein[p_a]
+```
+
+with x the standardised continuous features — log alignment depth, log sequence length, the PLL and its
+square — and partial pooling within each grouping: the function, taxon and protein effects are each drawn
+from a normal distribution whose spread is estimated from the data. Partial pooling matters because the
+groups are very unequal (13 binding assays against 77 of organismal fitness, and 186 proteins for 217
+assays): a group with few assays is pulled towards the overall mean in proportion to how little it has to
+say. The protein effect captures what is consistent across one protein's assays beyond the listed features,
+so that a protein measured five times does not count as five independent pieces of evidence. The squared PLL
+term is what would show the inverted U. Priors are weakly informative (alpha ~ Normal(0.4, 0.5), each
+spread ~ HalfNormal(0.3), g ~ Normal(0, 0.3)); sampled with PyMC's NUTS, four chains, and R-hat and
+effective sample size reported with the results.
+
+The same model is fitted a second time with the outcome the *change* in accuracy from 650M to 15B, to ask
+where scale helps and where it hurts.
+
+## How many measurements does it take to beat the zero-shot score?
+
+Zero-shot scoring needs no measurements at all. The practical question for someone with a protein in hand is
+how much measured data it takes before fitting a model to those measurements does better — and that answer
+depends entirely on which variants they will want to predict.
+
+ProteinGym supplies three five-fold splits of each assay's single mutants, which differ in how the test
+variants relate to the training ones:
+
+| Split | How folds are assigned | A test variant's position |
+|---|---|---|
+| **random** | variants at random | usually seen in training, with a different substitution |
+| **modulo** | positions in rotation (1, 6, 11, … in one fold) | new, but its neighbours were seen |
+| **contiguous** | the sequence cut into five blocks | new, and so are its neighbours |
+
+Three predictors are compared on the held-out fold, following Hsu et al. (2022):
+
+- **zero-shot** — the language model's score (ESM-2 650M, wild-type marginal), no training;
+- **one-hot** — ridge regression on indicators of the position, of the (position, amino acid) pair and of the
+  mutant amino acid, which for single mutants is the information in a one-hot encoding of the whole mutated
+  sequence;
+- **augmented** — the same features plus the zero-shot score, scaled up thirtyfold so the ridge penalty
+  barely shrinks it.
+
+Training sets of 24 to 1,536 variants are drawn at random from the four training folds, and the ridge
+penalty is chosen within the training set by leave-one-out cross-validation over nine values. A larger
+training set is only possible in a larger assay, so each point on a learning curve compares the supervised
+models with the zero-shot score on exactly the assays big enough to reach that training size in every fold,
+and the number of assays is reported alongside.
