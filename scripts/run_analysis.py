@@ -9,7 +9,7 @@ Reads the score caches written by score_assays.py and ProteinGym's published res
   results/hierarchy_650M.json posterior summaries of the partially pooled model of ESM-2 650M's accuracy
   results/hierarchy_scale.json the same for the change from 650M to 15B
 
-Usage:  python scripts/run_analysis.py [--skip-model]
+Usage:  python scripts/run_analysis.py [--skip-model] [--reuse]
 """
 
 from __future__ import annotations
@@ -111,31 +111,48 @@ def posterior_summary(idata, d) -> dict:
         out[name + "_spearman"] = {str(k): summ(np.tanh(alpha + vals[..., i])) for i, k in enumerate(post[coord].values)}
     g = post["g"].values
     out["g"] = {str(k): summ(g[..., i]) for i, k in enumerate(post["feature"].values)}
-    for k in ("tau_function", "tau_taxon", "tau_protein", "sigma"):
+    spreads = [k for k in ("tau_function", "tau_taxon", "tau_protein", "sigma") if k in post]
+    for k in spreads:
         out[k] = summ(post[k].values)
     out["x_mean"] = dict(zip(d.x_names, map(float, d.x_mean)))
     out["x_sd"] = dict(zip(d.x_names, map(float, d.x_sd)))
+    out["n_assays"] = int(len(d.z))
+    # the turning point of the quadratic feature, back on its original scale
+    for j, name in enumerate(d.x_names):
+        if not name.endswith("^2"):
+            continue
+        i = d.x_names.index(name[:-2])
+        peak = -g[..., i] / (2 * g[..., j])
+        inside = (peak > -2) & (peak < 2) & (g[..., j] < 0)      # a maximum within the observed range
+        v = {"share_with_interior_maximum": float(inside.mean())}
+        if inside.any():
+            v.update(summ(d.x_mean[i] + d.x_sd[i] * peak[inside]))
+        out[f"peak_{name[:-2]}"] = v
     import arviz as az
-    s = az.summary(idata, var_names=["alpha", "g", "tau_function", "tau_taxon", "tau_protein", "sigma"])
-    out["max_rhat"] = float(s["r_hat"].max())
-    out["min_ess_bulk"] = float(s["ess_bulk"].min())
+    summary = az.summary(idata, var_names=["alpha", "g"] + spreads)
+    out["max_rhat"] = float(summary["r_hat"].max())
+    out["min_ess_bulk"] = float(summary["ess_bulk"].min())
     return out
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--skip-model", action="store_true")
+    ap.add_argument("--skip-model", action="store_true", help="tables only, no hierarchical model")
+    ap.add_argument("--reuse", action="store_true", help="reuse results/assays.csv instead of rescoring")
     args = ap.parse_args()
     RESULTS.mkdir(exist_ok=True)
     ref = reference()
-    df = build_assay_table(ref)
-    df["log_neff_l"] = np.log10(df["MSA_Neff_L"] + 1.0)
-    df["log_length"] = np.log10(df["seq_len"])
-    df.to_csv(RESULTS / "assays.csv")
-    scaling = scaling_table(df, ref)
-    scaling.to_csv(RESULTS / "scaling.csv", index=False)
-    print(scaling[scaling["group"] == "All"].pivot(index="size", columns="source", values="spearman")
-          .reindex(SIZES).round(3).to_string())
+    if args.reuse and (RESULTS / "assays.csv").exists():
+        df = pd.read_csv(RESULTS / "assays.csv", index_col=0)
+    else:
+        df = build_assay_table(ref)
+        df["log_neff_l"] = np.log10(df["MSA_Neff_L"] + 1.0)
+        df["log_length"] = np.log10(df["seq_len"])
+        df.to_csv(RESULTS / "assays.csv")
+        scaling = scaling_table(df, ref)
+        scaling.to_csv(RESULTS / "scaling.csv", index=False)
+        print(scaling[scaling["group"] == "All"].pivot(index="size", columns="source", values="spearman")
+              .reindex(SIZES).round(3).to_string())
     if args.skip_model:
         return
 
@@ -145,11 +162,16 @@ def main():
     d = design(df, "published_650M", "n", feats, squares=("pll_single_650M",))
     _, idata = fit(d)
     summary = posterior_summary(idata, d)
-    protein_eff = idata.posterior["protein_effect"].values.reshape(-1, d.protein.max() + 1).mean(axis=0)
-    summary["n_assays"] = int(len(d.z))
     (RESULTS / "hierarchy_650M.json").write_text(json.dumps(summary, indent=1))
-    print("650M:", json.dumps({k: summary[k] for k in ("function_effect_spearman", "taxon_effect_spearman", "g")},
-                              indent=1))
+    protein_eff = idata.posterior["protein_effect"].values.reshape(-1, d.protein.max() + 1).mean(axis=0)
+    pd.Series(protein_eff, index=pd.factorize(df["UniProt_ID"], sort=True)[1],
+              name="protein_effect").to_csv(RESULTS / "protein_effects_650M.csv")
+    report("ESM-2 650M", summary)
+
+    # the same without protein effects, to show how much the group effects rest on repeated proteins
+    _, idata_np = fit(d, protein_effects=False)
+    (RESULTS / "hierarchy_650M_no_protein.json").write_text(
+        json.dumps(posterior_summary(idata_np, d), indent=1))
 
     # what changes from 650M to 15B: same structure, outcome the difference in Fisher z
     z15, se15 = np.arctanh(df["published_15B"].clip(-0.999, 0.999)), np.sqrt(1.06 / (df["n"] - 3))
@@ -159,8 +181,19 @@ def main():
     _, idata2 = fit(d2)
     summary2 = posterior_summary(idata2, d2)
     (RESULTS / "hierarchy_scale.json").write_text(json.dumps(summary2, indent=1))
-    print("650M -> 15B:", json.dumps({k: summary2[k] for k in ("function_effect", "taxon_effect", "g")}, indent=1))
-    pd.Series(protein_eff, name="protein_effect").to_csv(RESULTS / "protein_effects_650M.csv")
+    report("650M to 15B", summary2)
+
+
+def report(title: str, s: dict) -> None:
+    print(f"\n{title}: {s['n_assays']} assays, R-hat <= {s['max_rhat']:.3f}, ESS >= {s['min_ess_bulk']:.0f}")
+    print(f"  baseline Spearman {s['baseline_spearman']['mean']:+.3f}")
+    for key in ("g", "function_effect", "taxon_effect"):
+        for name, v in s[key].items():
+            print(f"  {name:28s} {v['mean']:+.3f} [{v['q05']:+.3f}, {v['q95']:+.3f}]  p+ {v['p_positive']:.2f}")
+    for k, v in s.items():
+        if k.startswith("peak_") and "mean" in v:
+            print(f"  {k} {v['mean']:+.2f} [{v['q05']:+.2f}, {v['q95']:+.2f}] "
+                  f"(interior maximum in {v['share_with_interior_maximum']:.0%} of draws)")
 
 
 if __name__ == "__main__":

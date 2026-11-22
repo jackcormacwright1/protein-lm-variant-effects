@@ -65,7 +65,12 @@ def design(df: pd.DataFrame, outcome: str, n_col: str, continuous: list[str],
                   x_sd=sd, index=df.index)
 
 
-def fit(d: Design, draws: int = 1000, tune: int = 1000, chains: int = 4, seed: int = 0):
+def fit(d: Design, draws: int = 2000, tune: int = 2000, chains: int = 4, seed: int = 0,
+        protein_effects: bool = True):
+    """Sample the model. With protein_effects=False the protein level is dropped, which shows how much of the
+    function and taxon effects rests on treating one protein's several assays as independent: taxon is nested
+    inside protein (no protein spans two taxa) and only 14 of 186 proteins have assays of more than one
+    function, so the protein effects and the group effects compete for the same between-protein variation."""
     import pymc as pm
     coords = {"function": d.function_names, "taxon": d.taxon_names, "feature": d.x_names,
               "protein": np.arange(d.protein.max() + 1), "assay": np.arange(len(d.z))}
@@ -73,16 +78,18 @@ def fit(d: Design, draws: int = 1000, tune: int = 1000, chains: int = 4, seed: i
         alpha = pm.Normal("alpha", 0.4, 0.5)
         tau_f = pm.HalfNormal("tau_function", 0.3)
         tau_t = pm.HalfNormal("tau_taxon", 0.3)
-        tau_p = pm.HalfNormal("tau_protein", 0.3)
         sigma = pm.HalfNormal("sigma", 0.3)
         b_f = pm.Normal("b_function", 0, 1, dims="function") * tau_f
         b_t = pm.Normal("b_taxon", 0, 1, dims="taxon") * tau_t
-        u_p = pm.Normal("u_protein", 0, 1, dims="protein") * tau_p
         g = pm.Normal("g", 0, 0.3, dims="feature")
-        mu = alpha + b_f[d.function] + b_t[d.taxon] + pm.math.dot(d.X, g) + u_p[d.protein]
+        mu = alpha + b_f[d.function] + b_t[d.taxon] + pm.math.dot(d.X, g)
+        if protein_effects:
+            tau_p = pm.HalfNormal("tau_protein", 0.3)
+            u_p = pm.Normal("u_protein", 0, 1, dims="protein") * tau_p
+            mu = mu + u_p[d.protein]
+            pm.Deterministic("protein_effect", u_p, dims="protein")
         pm.Deterministic("function_effect", b_f, dims="function")
         pm.Deterministic("taxon_effect", b_t, dims="taxon")
-        pm.Deterministic("protein_effect", u_p, dims="protein")
         pm.Normal("z", mu, pm.math.sqrt(d.se ** 2 + sigma ** 2), observed=d.z, dims="assay")
         idata = pm.sample(draws=draws, tune=tune, chains=chains, random_seed=seed, target_accept=0.95,
                           progressbar=False)
