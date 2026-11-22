@@ -7,6 +7,7 @@ It reads the results written by the scripts in scripts/.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import altair as alt
@@ -63,7 +64,9 @@ def note(text: str) -> None:
 
 
 def callout(text: str) -> None:
-    st.markdown(f'<div class="callout">{text}</div>', unsafe_allow_html=True)
+    """A bordered note. Markdown bold is translated, since the div is raw HTML."""
+    html = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+    st.markdown(f'<div class="callout">{html}</div>', unsafe_allow_html=True)
 
 
 def kpi(label: str, value: str, text: str) -> str:
@@ -224,12 +227,13 @@ with tabs[0]:
             t = pd.DataFrame(rows).set_index("ESM-2")
             st.dataframe(t.style.format({c: "{:.3f}" for c in t.columns if c != "assays"}),
                          use_container_width=True)
-            callout("The two agree on single mutants. The gap opens on assays with multiple substitutions, "
-                    "and the reason is in the last three columns: measured fitness falls with the number of "
-                    "substitutions, the one-pass score tracks that strongly and the masked score barely "
-                    "does. Masking a position makes the model much less sure of the wild-type residue "
-                    "there, so each substitution subtracts less, and a sum over several of them carries "
-                    "less of the count.")
+            callout("The two agree on single mutants at every size. The gap opens on assays with multiple "
+                    "substitutions, and closes as the model grows. The last three columns say why: "
+                    "measured fitness falls with the number of substitutions, the one-pass score tracks "
+                    "that strongly whatever the size, and the masked score tracks it weakly in the "
+                    "smallest model and increasingly well in the larger ones. Masking a position leaves a "
+                    "small model very unsure of the residue that belongs there, so each substitution "
+                    "subtracts little and a sum over several of them barely registers how many there are.")
         masked = [x for x in OWN if f"mine_{x}_masked" in assays and assays[f"mine_{x}_masked"].notna().any()]
         if masked:
             rows = []
