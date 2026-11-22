@@ -29,9 +29,9 @@ PREDICTOR = {"zero-shot": "#6b6a66", "one-hot": "#eb6834", "augmented": "#2a78d6
 SCHEME_NAMES = {"random": "Random variants", "modulo": "Every fifth position", "contiguous": "Blocks of sequence"}
 FUNCTIONS = ["Activity", "Binding", "Expression", "OrganismalFitness", "Stability"]
 TAXA = ["Human", "Eukaryote", "Prokaryote", "Virus"]
-PRETTY = {"OrganismalFitness": "Organismal fitness", "log_neff_l": "Alignment depth (log)",
-          "log_length": "Sequence length (log)", "pll_single_650M": "Wild-type preference (PLL)",
-          "pll_single_650M^2": "PLL squared"}
+PRETTY = {"OrganismalFitness": "Organismal fitness", "log_neff_l": "Alignment depth",
+          "log_length": "Sequence length", "pll_single_650M": "Wild-type preference",
+          "pll_single_650M^2": "Preference, squared"}
 NEUTRAL, MUTED, GRID, INK = "#52514e", "#898781", "#e1e0d9", "#1d1d1b"
 
 st.markdown(f"""
@@ -40,7 +40,8 @@ st.markdown(f"""
 .eyebrow {{ color: {NEUTRAL}; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
             margin: 0.4rem 0 0.35rem; }}
 .lede {{ color: #3a3936; font-size: 1.02rem; margin: -0.4rem 0 0.6rem; max-width: 62rem; }}
-.kpi {{ background: #ffffff; border: 1px solid {GRID}; border-radius: 10px; padding: 0.8rem 1rem 0.85rem; height: 100%; }}
+.kpi {{ background: #ffffff; border: 1px solid {GRID}; border-radius: 10px; padding: 0.8rem 1rem 0.85rem;
+        height: 100%; }}
 .kpi .label {{ color: {NEUTRAL}; font-size: 0.86rem; line-height: 1.3; min-height: 2.2rem; }}
 .kpi .value {{ color: {INK}; font-size: 2rem; font-weight: 600; line-height: 1.15; margin: 0.15rem 0 0.3rem;
                font-variant-numeric: tabular-nums; white-space: nowrap; }}
@@ -122,7 +123,8 @@ if scaling is not None:
             "Spearman, ProteinGym's average over functions. The 15B model manages "
             f"{pub['15B']:.3f}"),
         kpi("The one-pass score, same model", f"{mine['650M']:.3f}",
-            f"about 200× cheaper, and no worse: {mine['8M'] - pub['8M']:+.3f} at 8M"),
+            "a median of 150× cheaper per assay, and ahead at every size: "
+            f"{mine['8M'] - pub['8M']:+.3f} at 8M"),
         kpi("Where accuracy peaks", "PLL ≈ −0.8" if h650 else "—",
             "How strongly the model prefers the natural sequence: more is better, until it is not"),
     ]
@@ -146,16 +148,20 @@ with tabs[0]:
         have = [s for s in OWN if f"mine_{s}_wt" in assays]
         pick = st.radio("Model size", have, index=len(have) - 1, horizontal=True)
         d = assays.reset_index().rename(columns={"index": "DMS_id"})
+        d["measured"] = d["coarse_selection_type"].map(lambda f: PRETTY.get(f, f))
         d["published"] = d[f"published_{pick}"]
         d["mine"] = d[f"mine_{pick}_wt"]
         d["difference"] = d["mine"] - d["published"]
         line = pd.DataFrame({"x": [-0.3, 0.95]})
         base = alt.Chart(d).properties(height=340)
         points = base.mark_circle(size=42, opacity=0.75).encode(
-            x=alt.X("published:Q", title="published, masked marginal", scale=alt.Scale(domain=[-0.3, 0.95])),
-            y=alt.Y("mine:Q", title="this project, one pass", scale=alt.Scale(domain=[-0.3, 0.95])),
-            color=alt.Color("coarse_selection_type:N", title="measured",
-                            scale=alt.Scale(domain=FUNCTIONS, range=RAMP[:5])),
+            x=alt.X("published:Q", title="published, masked marginal",
+                    scale=alt.Scale(domain=[-0.3, 0.95], nice=False)),
+            y=alt.Y("mine:Q", title="this project, one pass",
+                    scale=alt.Scale(domain=[-0.3, 0.95], nice=False)),
+            color=alt.Color("measured:N", title="measured", scale=alt.Scale(
+                domain=[PRETTY.get(f, f) for f in FUNCTIONS],
+                range=["#2a78d6", "#eb6834", "#1baf7a", "#6250d6", "#eda100"])),
             tooltip=[alt.Tooltip("DMS_id:N", title="assay"), alt.Tooltip("published:Q", format=".3f"),
                      alt.Tooltip("mine:Q", format=".3f"), alt.Tooltip("n:Q", title="variants", format=",")]
             if "n" in d else ["DMS_id:N"])
@@ -169,22 +175,72 @@ with tabs[0]:
         cols[1].altair_chart(hist + rule, use_container_width=True)
         agg = scaling[(scaling["group"] == "All")].pivot(index="size", columns="source", values="spearman")
         better = int((d["difference"] > 0).sum())
-        callout(f"At **{pick}** the one-pass score is better on **{better} of {len(d)} assays**, and the "
-                f"aggregate changes by **{agg.loc[pick, 'this project (wild-type)'] - agg.loc[pick, 'published (masked)']:+.3f}**. "
-                "The per-assay scatter is wider at the small sizes: the two ways of reading the model agree "
-                "more closely the larger it is.")
-        masked = [s for s in OWN if f"mine_{s}_masked" in assays and assays[f"mine_{s}_masked"].notna().any()]
+        callout(f"At **{pick}** the one-pass score is better on **{better} of {len(d)} assays** but ahead "
+                "in the aggregate by "
+                f"**{agg.loc[pick, 'this project (wild-type)'] - agg.loc[pick, 'published (masked)']:+.3f}**: "
+                "a small loss on most assays and a large gain on a few. The next panel shows which.")
+
+        cmp = load_csv("scoring_methods.csv")
+        if cmp is not None:
+            st.subheader("Where the two scores part company")
+            st.markdown("On the assays scored both ways, separating single mutants from variants carrying "
+                        "several substitutions.")
+            sizes = [x for x in OWN if x in set(cmp["size"])]
+            e = cmp.copy()
+            e["gain"] = e["wt_all"] - e["masked_all"]
+            left = alt.Chart(e).mark_circle(size=40, opacity=0.75).encode(
+                x=alt.X("masked_singles:Q", title="masked marginal", scale=alt.Scale(nice=False)),
+                y=alt.Y("wt_singles:Q", title="wild-type marginal", scale=alt.Scale(nice=False)),
+                color=alt.Color("size:N", title="ESM-2", scale=alt.Scale(
+                    domain=sizes, range=[SIZE_COLOUR[x] for x in sizes])),
+                tooltip=["DMS_id:N", "size:N", alt.Tooltip("masked_singles:Q", format=".3f"),
+                         alt.Tooltip("wt_singles:Q", format=".3f")]).properties(
+                height=320, title="Single mutants only")
+            diag = alt.Chart(pd.DataFrame({"x": [-0.1, 0.9]})).mark_line(color=GRID).encode(x="x:Q", y="x:Q")
+            right = (alt.Chart(pd.DataFrame({"y": [0.0]})).mark_rule(color=INK).encode(y="y:Q")
+                     + alt.Chart(e).mark_circle(size=40, opacity=0.75).encode(
+                         x=alt.X("share_multiple:Q", title="share of variants with several substitutions"),
+                         y=alt.Y("gain:Q", title="wild-type − masked (Spearman)"),
+                         color=alt.Color("size:N", title="ESM-2", scale=alt.Scale(
+                             domain=sizes, range=[SIZE_COLOUR[x] for x in sizes])),
+                         tooltip=["DMS_id:N", "size:N", alt.Tooltip("share_multiple:Q", format=".2f"),
+                                  alt.Tooltip("gain:Q", format="+.3f")])).properties(
+                height=320, title="All variants")
+            cols = st.columns(2)
+            cols[0].altair_chart(diag + left, use_container_width=True)
+            cols[1].altair_chart(right, use_container_width=True)
+            rows = []
+            for size in sizes:
+                g = cmp[cmp["size"] == size]
+                heavy = g["share_multiple"] > 0.2
+                rows.append({"ESM-2": size, "assays": len(g),
+                             "singles, wild-type": g["wt_singles"].mean(),
+                             "singles, masked": g["masked_singles"].mean(),
+                             "with multiple mutants, wild-type": g.loc[heavy, "wt_all"].mean(),
+                             "with multiple mutants, masked": g.loc[heavy, "masked_all"].mean(),
+                             "measured vs count": g.loc[heavy, "measured_vs_count"].mean(),
+                             "wild-type vs count": g.loc[heavy, "wt_vs_count"].mean(),
+                             "masked vs count": g.loc[heavy, "masked_vs_count"].mean()})
+            t = pd.DataFrame(rows).set_index("ESM-2")
+            st.dataframe(t.style.format({c: "{:.3f}" for c in t.columns if c != "assays"}),
+                         use_container_width=True)
+            callout("The two agree on single mutants. The gap opens on assays with multiple substitutions, "
+                    "and the reason is in the last three columns: measured fitness falls with the number of "
+                    "substitutions, the one-pass score tracks that strongly and the masked score barely "
+                    "does. Masking a position makes the model much less sure of the wild-type residue "
+                    "there, so each substitution subtracts less, and a sum over several of them carries "
+                    "less of the count.")
+        masked = [x for x in OWN if f"mine_{x}_masked" in assays and assays[f"mine_{x}_masked"].notna().any()]
         if masked:
             rows = []
-            for s in masked:
-                diff = (assays[f"mine_{s}_masked"] - assays[f"published_{s}"]).abs().dropna()
-                rows.append({"size": s, "assays": len(diff), "largest difference": diff.max(),
+            for size in masked:
+                diff = (assays[f"mine_{size}_masked"] - assays[f"published_{size}"]).abs().dropna()
+                rows.append({"size": size, "assays": len(diff), "largest difference": diff.max(),
                              "mean difference": diff.mean()})
-            st.markdown("**The reproduction check.** Scoring the same way ProteinGym does, on the assays "
-                        "scored here, reproduces its published per-assay numbers:")
+            st.markdown("**The reproduction check.** Scoring the way ProteinGym does reproduces its "
+                        "published per-assay numbers:")
             st.dataframe(pd.DataFrame(rows).style.format({"largest difference": "{:.5f}",
-                                                          "mean difference": "{:.5f}"}),
-                         hide_index=True, use_container_width=False)
+                                                          "mean difference": "{:.5f}"}), hide_index=True)
 
 # ---------------------------------------------------------------- scaling
 with tabs[1]:
@@ -206,7 +262,8 @@ with tabs[1]:
             d = d[d["source"] == "published (masked)"]
             enc_colour = alt.Color("group:N", title=None, scale=alt.Scale(scheme="tableau10"))
         base = alt.Chart(d).encode(
-            x=alt.X("parameters:Q", scale=alt.Scale(type="log"), title="parameters"),
+            x=alt.X("parameters:Q", scale=alt.Scale(type="log"), title="parameters",
+                    axis=alt.Axis(format="~s")),
             y=alt.Y("spearman:Q", title="Spearman (ProteinGym average)", scale=alt.Scale(zero=False)),
             color=enc_colour,
             tooltip=["size:N", "group:N", "source:N", alt.Tooltip("spearman:Q", format=".3f")])
@@ -242,7 +299,7 @@ with tabs[2]:
         d = pd.DataFrame(rows)
         order = list(d["name"])
         base = alt.Chart(d).encode(
-            y=alt.Y("name:N", sort=order, title=None),
+            y=alt.Y("name:N", sort=order, title=None, axis=alt.Axis(labelLimit=220)),
             color=alt.Color("group:N", title=None, scale=alt.Scale(
                 domain=["Feature", "What was measured", "Taxon"], range=["#eb6834", "#2a78d6", "#8fb8e2"])))
         bars = base.mark_rule(size=3).encode(x=alt.X("q05:Q", title="effect on Fisher z"), x2="q95:Q")
@@ -366,19 +423,19 @@ with tabs[4]:
         d = fewshot.copy()
         d["split"] = d["scheme"].map(SCHEME_NAMES)
         order = [SCHEME_NAMES[s] for s in ("random", "modulo", "contiguous")]
-        zs = d[d["model"] == "augmented"][["split", "n_train", "zero_shot", "n_assays"]]
-        base = alt.Chart(d).encode(x=alt.X("n_train:Q", scale=alt.Scale(type="log"),
-                                           title="measured variants used for training"),
-                                   y=alt.Y("spearman:Q", title="Spearman (ProteinGym average)"))
-        lines = base.mark_line(point=True).encode(
+        zs = d[d["model"] == "augmented"].assign(model="zero-shot", spearman=lambda f: f["zero_shot"])
+        long = pd.concat([d, zs], ignore_index=True)
+        chart = alt.Chart(long).mark_line(point=True).encode(
+            x=alt.X("n_train:Q", scale=alt.Scale(type="log"), title="measured variants used for training"),
+            y=alt.Y("spearman:Q", title="Spearman (ProteinGym average)", scale=alt.Scale(zero=False)),
             color=alt.Color("model:N", title=None, scale=alt.Scale(
-                domain=["one-hot", "augmented"], range=[PREDICTOR["one-hot"], PREDICTOR["augmented"]])),
+                domain=["zero-shot", "one-hot", "augmented"],
+                range=[PREDICTOR["zero-shot"], PREDICTOR["one-hot"], PREDICTOR["augmented"]])),
+            strokeDash=alt.StrokeDash("model:N", legend=None, scale=alt.Scale(
+                domain=["zero-shot", "one-hot", "augmented"], range=[[5, 3], [1, 0], [1, 0]])),
             tooltip=["split:N", "model:N", "n_train:Q", alt.Tooltip("spearman:Q", format=".3f"),
-                     alt.Tooltip("zero_shot:Q", format=".3f"), alt.Tooltip("n_assays:Q", title="assays")])
-        zline = alt.Chart(zs).mark_line(color=PREDICTOR["zero-shot"], strokeDash=[5, 3]).encode(
-            x=alt.X("n_train:Q", scale=alt.Scale(type="log")), y="zero_shot:Q")
-        st.altair_chart((lines + zline).facet(column=alt.Column("split:N", sort=order, title=None),
-                                              spacing=28).resolve_scale(y="shared"),
+                     alt.Tooltip("n_assays:Q", title="assays")]).properties(height=330, width=330)
+        st.altair_chart(chart.facet(column=alt.Column("split:N", sort=order, title=None), spacing=24),
                         use_container_width=True)
         legend([("one-hot ridge", PREDICTOR["one-hot"]), ("one-hot + zero-shot score", PREDICTOR["augmented"]),
                 ("zero-shot alone, same assays", PREDICTOR["zero-shot"])])

@@ -74,7 +74,8 @@ def build_assay_table(ref: pd.DataFrame) -> pd.DataFrame:
 
 def scaling_table(df: pd.DataFrame, ref: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    groups = [("All", None)] + [(f, ("coarse_selection_type", f)) for f in sorted(df["coarse_selection_type"].unique())] \
+    groups = [("All", None)] \
+        + [(f, ("coarse_selection_type", f)) for f in sorted(df["coarse_selection_type"].unique())] \
         + [(t, ("taxon", t)) for t in sorted(df["taxon"].unique())] \
         + [(f"{c} MSA depth", ("MSA_Neff_L_category", c)) for c in ("Low", "Medium", "High")]
     for s in SIZES:
@@ -111,7 +112,8 @@ def posterior_summary(idata, d) -> dict:
         vals = post[name].values
         out[name] = {str(k): summ(vals[..., i]) for i, k in enumerate(post[coord].values)}
         # what each category's typical assay scores, other features at their average
-        out[name + "_spearman"] = {str(k): summ(np.tanh(alpha + vals[..., i])) for i, k in enumerate(post[coord].values)}
+        out[name + "_spearman"] = {str(k): summ(np.tanh(alpha + vals[..., i]))
+                                   for i, k in enumerate(post[coord].values)}
     g = post["g"].values
     out["g"] = {str(k): summ(g[..., i]) for i, k in enumerate(post["feature"].values)}
     spreads = [k for k in ("tau_function", "tau_taxon", "tau_protein", "sigma") if k in post]
@@ -205,7 +207,8 @@ def report(title: str, s: dict) -> None:
     print(f"  baseline Spearman {s['baseline_spearman']['mean']:+.3f}")
     for key in ("g", "function_effect", "taxon_effect"):
         for name, v in s[key].items():
-            print(f"  {name:28s} {v['mean']:+.3f} [{v['q05']:+.3f}, {v['q95']:+.3f}]  p+ {v['p_positive']:.2f}")
+            print(f"  {name:28s} {v['mean']:+.3f} [{v['q05']:+.3f}, {v['q95']:+.3f}]  "
+                  f"p+ {v['p_positive']:.2f}")
     for k, v in s.items():
         if not k.startswith("peak_"):
             continue

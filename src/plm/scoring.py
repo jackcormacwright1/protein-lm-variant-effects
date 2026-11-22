@@ -176,4 +176,3 @@ class Scorer:
         else:
             raise ValueError(strategy)
         return lp, time.time() - t0
-
