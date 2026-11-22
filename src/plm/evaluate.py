@@ -81,6 +81,30 @@ def spearman_tables(cache_names: list[str], ref: pd.DataFrame | None = None) -> 
     return {name: pd.DataFrame(r).set_index("DMS_id") for name, r in rows.items()}
 
 
+def compare_scoring(size: str, ref: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Wild-type against masked marginals on the assays scored both ways, separating single from multiple
+    mutants and recording how strongly each score tracks the number of substitutions."""
+    ref = ref if ref is not None else reference()
+    wt_dir, masked_dir = CACHE / f"{size}_wt", CACHE / f"{size}_masked"
+    rows = []
+    for path in sorted(masked_dir.glob("*.npz")):
+        dms_id = path.stem
+        v = load(dms_id, ref).variants
+        k, y = v["n_mutations"].to_numpy(), v["DMS_score"].to_numpy()
+        single = (k == 1)
+        row = {"DMS_id": dms_id, "n": len(v), "share_multiple": float(1 - single.mean()),
+               "measured_vs_count": spearmanr(k, y).statistic if k.min() != k.max() else np.nan}
+        for name, d in (("wt", wt_dir), ("masked", masked_dir)):
+            score = LogProbs.load(d / f"{dms_id}.npz").score(v["mutant"])
+            row[f"{name}_all"] = spearmanr(score, y).statistic
+            row[f"{name}_singles"] = spearmanr(score[single], y[single]).statistic if single.sum() > 20 \
+                else np.nan
+            row[f"{name}_vs_count"] = spearmanr(k, score).statistic if k.min() != k.max() else np.nan
+            row[f"{name}_wt_logp"] = float(np.mean(LogProbs.load(d / f"{dms_id}.npz").wildtype_logp()))
+        rows.append(row)
+    return pd.DataFrame(rows).set_index("DMS_id")
+
+
 def spearman_table(cache_name: str, ref: pd.DataFrame | None = None) -> pd.DataFrame:
     """Per-assay Spearman for one cache (e.g. '8M_masked')."""
     return spearman_tables([cache_name], ref)[cache_name]

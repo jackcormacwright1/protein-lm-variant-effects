@@ -6,6 +6,8 @@ Reads the score caches written by score_assays.py and ProteinGym's published res
                               project's Spearman (wild-type and masked marginals) and wild-type pseudo-likelihoods
   results/scaling.csv         ProteinGym-style aggregate Spearman by model size, overall and by function,
                               taxon and alignment depth, published and reproduced
+  results/scoring_methods.csv the two ways of scoring compared on the assays scored both ways, split by
+                              single and multiple mutants
   results/hierarchy_650M.json posterior summaries of the partially pooled model of ESM-2 650M's accuracy
   results/hierarchy_scale.json the same for the change from 650M to 15B
 
@@ -26,7 +28,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from plm.data import PUBLISHED, reference  # noqa: E402
-from plm.evaluate import CACHE, aggregate, bootstrap_se, by_function, spearman_tables  # noqa: E402
+from plm.evaluate import (CACHE, aggregate, bootstrap_se, by_function, compare_scoring,  # noqa: E402
+                          spearman_tables)
 from plm.scoring import LogProbs  # noqa: E402
 
 RESULTS = ROOT / "results"
@@ -149,6 +152,19 @@ def main():
         df["log_neff_l"] = np.log10(df["MSA_Neff_L"] + 1.0)
         df["log_length"] = np.log10(df["seq_len"])
         df.to_csv(RESULTS / "assays.csv")
+        for size in OWN:
+            if (CACHE / f"{size}_masked").exists():
+                cmp = compare_scoring(size, ref)
+                cmp.insert(0, "size", size)
+                path = RESULTS / "scoring_methods.csv"
+                cmp.to_csv(path, mode="a" if size != OWN[0] and path.exists() else "w",
+                           header=not (size != OWN[0] and path.exists()))
+                heavy = cmp["share_multiple"] > 0.2
+                print(f"  {size}: wild-type vs masked, singles only "
+                      f"{cmp['wt_singles'].mean():.3f} vs {cmp['masked_singles'].mean():.3f}; "
+                      f"on the {heavy.sum()} assays with multiple mutants "
+                      f"{cmp.loc[heavy, 'wt_all'].mean():.3f} vs {cmp.loc[heavy, 'masked_all'].mean():.3f}",
+                      flush=True)
         scaling = scaling_table(df, ref)
         scaling.to_csv(RESULTS / "scaling.csv", index=False)
         print(scaling[scaling["group"] == "All"].pivot(index="size", columns="source", values="spearman")

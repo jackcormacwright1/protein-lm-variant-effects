@@ -57,6 +57,13 @@ A multiple mutant scores the sum of its substitutions' scores, which assumes the
 ProteinGym scores ESM models with the masked marginal. Meier et al. (2021) found the two nearly as good as
 each other for ESM-1v; this project checks that for ESM-2 at every size.
 
+The two are compared on the assays scored both ways, separating single from multiple mutants, since only
+multiple mutants expose the additivity assumption. How strongly each score tracks the *number* of
+substitutions in a variant is recorded alongside, because that is where the two methods part company: the
+unmasked model is much more confident in the wild-type residue than the masked one (mean log probability
+−0.41 against −2.45 at 8M), so each substitution subtracts a larger amount, and a sum over several of them
+depends more strongly on how many there are.
+
 ESM-2 reads at most 1,022 residues. For a longer protein each position is read from a window of that length:
 for the masked marginal, the window ProteinGym uses (centred on the position, clipped to the sequence ends);
 for the wild-type marginal, the most central of a set of half-overlapping windows that tile the sequence.
