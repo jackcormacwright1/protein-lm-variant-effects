@@ -191,9 +191,14 @@ def report(title: str, s: dict) -> None:
         for name, v in s[key].items():
             print(f"  {name:28s} {v['mean']:+.3f} [{v['q05']:+.3f}, {v['q95']:+.3f}]  p+ {v['p_positive']:.2f}")
     for k, v in s.items():
-        if k.startswith("peak_") and "mean" in v:
+        if not k.startswith("peak_"):
+            continue
+        share = v["share_with_interior_maximum"]
+        if share < 0.5:
+            print(f"  {k}: no turning point inside the observed range in {1 - share:.0%} of draws")
+        else:
             print(f"  {k} {v['mean']:+.2f} [{v['q05']:+.2f}, {v['q95']:+.2f}] "
-                  f"(interior maximum in {v['share_with_interior_maximum']:.0%} of draws)")
+                  f"(a maximum inside the range in {share:.0%} of draws)")
 
 
 if __name__ == "__main__":

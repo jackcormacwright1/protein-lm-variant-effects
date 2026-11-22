@@ -91,6 +91,6 @@ def fit(d: Design, draws: int = 2000, tune: int = 2000, chains: int = 4, seed: i
         pm.Deterministic("function_effect", b_f, dims="function")
         pm.Deterministic("taxon_effect", b_t, dims="taxon")
         pm.Normal("z", mu, pm.math.sqrt(d.se ** 2 + sigma ** 2), observed=d.z, dims="assay")
-        idata = pm.sample(draws=draws, tune=tune, chains=chains, random_seed=seed, target_accept=0.95,
+        idata = pm.sample(draws=draws, tune=tune, chains=chains, random_seed=seed, target_accept=0.99,
                           progressbar=False)
     return model, idata
