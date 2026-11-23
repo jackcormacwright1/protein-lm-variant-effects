@@ -2,6 +2,8 @@
 
 [![tests](https://github.com/jackcormacwright1/protein-lm-variant-effects/actions/workflows/tests.yml/badge.svg)](https://github.com/jackcormacwright1/protein-lm-variant-effects/actions/workflows/tests.yml)
 
+**[Explore the results →](https://protein-lm-variant-effects.streamlit.app/)**
+
 ESM-2 is trained only on natural protein sequences, with no measurements at all, yet the probabilities it
 assigns to amino acids predict what mutations do. This project scores all 217 of ProteinGym's deep mutational
 scans with four sizes of ESM-2 and asks four questions: how well it works and how cheaply, which proteins it
